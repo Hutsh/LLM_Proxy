@@ -19,7 +19,7 @@
 
 这个版本不保留 Gemini / Antigravity。配置加载阶段会清理少量历史废弃字段并回写配置文件；除此之外不再继续扩展旧字段兼容逻辑。
 
-控制平面除了 Provider、Auth Group、用户、统计和系统设置，还可以在启用 `oauth.enabled` 后提供 OAuth 管理入口，用于生成和查看 CLI/OAuth 类本地认证文件。
+控制平面除了 Provider、Auth Group、用户、访问密钥、统计和系统设置，还可以在启用 `oauth.enabled` 后提供 OAuth 管理入口，用于生成和查看 CLI/OAuth 类本地认证文件。
 
 ## 2. Logical View
 
@@ -31,6 +31,7 @@
 downstream request
   -> data-plane CORS preflight / response headers
   -> controller
+  -> data-plane auth (IP whitelist or sk- access key)
   -> provider lookup
   -> header_hook / request_guard
   -> translator.translate_request()
@@ -51,7 +52,11 @@ downstream request
 
 - `ProxyController`
   - 根据当前 route family 选择下游接口协议
+  - 解析数据面访问主体，支持 IP 白名单和 `sk-` 访问密钥任一方式放行
   - 构造标准错误体
+- `AccessKeyController`
+  - 暴露数据面 `sk-` 访问密钥管理 API
+  - 支持默认生成密钥、自定义 `sk-` 密钥、启停和模型权限
 - `DataPlaneCors`
   - 只为 `/v1/*` 数据平面添加 CORS 响应头
   - 直接处理 `OPTIONS /v1/*` 预检请求
@@ -107,8 +112,12 @@ downstream request
   - 在协议支持时显式请求 usage 返回
   - 批量测试按前端当前选择的模型行逐条执行并逐条回填结果
 - `SettingsService`
-  - 维护 `server`、`admin`、`oauth` 与 `logging`
+  - 维护 `server`、`admin`、`oauth`、`chat` 与 `logging`
   - 管理立即生效项与重启生效项的边界
+- `AccessKeyService`
+  - 创建和校验数据面访问密钥
+  - 使用不可逆哈希匹配密钥，列表脱敏展示但支持复制明文密钥，并为历史缺失明文的记录补发可复制密钥
+  - 维护访问密钥模型权限
 - `ProviderRuntimeFactory`
   - 负责临时 / 正式 Provider 运行时对象构建
   - 统一 hook 加载与缓存
@@ -170,6 +179,27 @@ OAuth 模型是数据平面的例外路由：
 
 `OPTIONS /v1/*` 由表现层 CORS 钩子直接返回 `204`，用于支持浏览器、Obsidian 插件等第三方应用的跨域预检，不进入 provider lookup、白名单校验或上游代理链路。实际 `/v1/*` 响应也会附加 CORS 响应头；后台 `/api/*` 和管理页面不开放跨域。
 
+数据面认证链路如下：
+
+```text
+POST /v1/* or GET /v1/models
+  -> read Authorization: Bearer sk-* or X-API-Key: sk-*
+  -> if chat.api_key_enabled and key is valid/enabled: use access key subject
+  -> else if chat.whitelist_enabled and client IP user is enabled: use IP user subject
+  -> else if chat.api_key_enabled: 401 missing_api_key / invalid_api_key
+  -> else if chat.whitelist_enabled: 403 ip_not_whitelisted
+  -> else 403 data_plane_auth_disabled
+```
+
+访问密钥与 IP 白名单互相独立：
+
+- 只启用 `chat.api_key_enabled` 时，数据面必须携带有效 `sk-` 密钥。
+- 只启用 `chat.whitelist_enabled` 时，数据面沿用 IP 白名单。
+- 两者都启用时，有效 `sk-` 密钥或白名单 IP 任一满足即可访问。
+- 两者都关闭时，数据面拒绝访问，避免出现匿名访问。
+- 有效 `sk-` 密钥优先作为访问主体，用于模型权限过滤和用量归属。
+- 当请求使用访问密钥通过认证时，代理会在转发上游前移除下游的 `Authorization` 与 `X-API-Key`，避免代理自身密钥泄露给 Provider。
+
 ### 3.2 Control-Plane Settings Contract
 
 系统设置页与配置接口：
@@ -196,6 +226,7 @@ OAuth 模型是数据平面的例外路由：
 - `oauth.proxy_mode`
 - `oauth.proxy`
 - `oauth.verify_ssl`
+- `chat.api_key_enabled`
 
 行为约束：
 
@@ -240,6 +271,10 @@ OAuth 模型是数据平面的例外路由：
   - 保存后立即影响 OAuth 控制平面请求和 OAuth 数据面代理
   - 默认值为 `false`
   - 关闭时不校验 HTTPS 证书，便于本地代理或抓包代理场景
+- `chat.api_key_enabled`
+  - 保存后立即影响 `/v1/*` 数据面访问控制
+  - 默认值为 `false`，保持历史匿名/白名单行为
+  - 开启后可使用控制面创建的 `sk-` 访问密钥访问数据面
 
 运行时内存状态补充：
 
@@ -260,6 +295,9 @@ OAuth 模型是数据平面的例外路由：
   - 每次 Codex 数据面请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
 - `ClaudeProxyService`
   - 每次 Claude 数据面请求读取当前 `oauth.proxy_mode`、`oauth.proxy` 与 `oauth.verify_ssl`
+- `AccessKeyService`
+  - 数据面请求时按请求头中的 `sk-` token 查询启用中的访问密钥
+  - 数据库同时保存访问密钥明文、哈希与脱敏展示值；哈希用于请求匹配，明文用于后台复制；历史仅有哈希的记录会在读取详情或列表时自动补齐新的明文密钥
 
 ### 3.3 Provider Runtime Contract
 
@@ -518,6 +556,12 @@ OAuth Claude tab
   - 主代理 orchestration
 - [src/services/settings_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/settings_service.py)
   - 系统设置保存与生效边界
+- [src/services/access_key_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/access_key_service.py)
+  - 数据面 `sk-` 访问密钥生成、校验与模型权限
+- [src/presentation/access_key_controller.py](/root/.ww/code/002llm/000LLM_Proxy/src/presentation/access_key_controller.py)
+  - 访问密钥控制面 API
+- [src/repositories/access_key_repository.py](/root/.ww/code/002llm/000LLM_Proxy/src/repositories/access_key_repository.py)
+  - `access_keys` 表访问
 - [src/services/codex_oauth_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/codex_oauth_service.py)
   - Codex OAuth PKCE、token 文件、本地模型 ID 目录与配额查询
 - [src/services/claude_oauth_service.py](/root/.ww/code/002llm/000LLM_Proxy/src/services/claude_oauth_service.py)
@@ -551,6 +595,7 @@ OAuth Claude tab
 
 - 一个 Flask 应用
 - 一个配置文件
+- 一个 SQLite 数据库，保存用户、访问密钥、请求明细、日聚合统计和 Auth Group 运行态
 - 一组滚动日志文件
 - 一组本地 OAuth 认证文件
 - 一组本地 OAuth 模型目录缓存

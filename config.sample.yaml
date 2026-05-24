@@ -19,6 +19,8 @@ logging:
 chat:
   # 开启后会按 IP 白名单控制 chat 请求与 /v1/models 返回结果。
   whitelist_enabled: false
+  # 开启后数据面接受本代理创建的 sk- 访问密钥；关闭白名单时可作为唯一准入方式。
+  api_key_enabled: false
 
 admin:
   # username 和 password 同时非空时启用后台登录；

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import requests
-from flask import Flask
+from flask import Flask, Response
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -44,11 +44,15 @@ class FakeLogger:
 
 
 class FakeConfigManager:
-    def __init__(self, whitelist_enabled: bool = False) -> None:
+    def __init__(self, whitelist_enabled: bool = True, api_key_enabled: bool = False) -> None:
         self._whitelist_enabled = whitelist_enabled
+        self._api_key_enabled = api_key_enabled
 
     def is_chat_whitelist_enabled(self) -> bool:
         return self._whitelist_enabled
+
+    def is_chat_api_key_enabled(self) -> bool:
+        return self._api_key_enabled
 
 
 class FakeUserService:
@@ -101,6 +105,8 @@ class FakeUserService:
 
 
 class FakeLogService:
+    logged_api_key_id: int | None = None
+
     @staticmethod
     def log_request(
         request_model: str,
@@ -111,7 +117,9 @@ class FakeLogService:
         start_time=None,
         end_time=None,
         ip_address: str | None = None,
+        api_key_id: int | None = None,
     ) -> None:
+        FakeLogService.logged_api_key_id = api_key_id
         del (
             request_model,
             response_model,
@@ -121,7 +129,43 @@ class FakeLogService:
             start_time,
             end_time,
             ip_address,
+            api_key_id,
         )
+
+
+class FakeAccessKeyService:
+    def __init__(self, access_key: dict[str, Any] | None = None, accessible_models: list[str] | None = None) -> None:
+        self._access_key = access_key
+        self._accessible_models = accessible_models
+
+    def get_access_key_by_token(self, api_key: str | None) -> dict[str, Any] | None:
+        if api_key == "sk-valid":
+            return self._access_key or {"id": 7, "name": "demo-key", "model_permissions": "*"}
+        return None
+
+    def can_access_key_access_model(
+        self,
+        access_key: dict[str, Any] | None,
+        model_name: str,
+        available_models=None,
+    ) -> bool:
+        del access_key, available_models
+        if self._accessible_models is None:
+            return True
+        return model_name in set(self._accessible_models)
+
+    def get_accessible_models_for_key(
+        self,
+        access_key: dict[str, Any] | None,
+        available_models=None,
+    ) -> list[str]:
+        del access_key
+        if self._accessible_models is None:
+            return list(available_models or [])
+        if available_models is None:
+            return list(self._accessible_models)
+        available_set = set(available_models)
+        return [model_name for model_name in self._accessible_models if model_name in available_set]
 
 
 class FakeProviderManager:
@@ -161,6 +205,21 @@ class StubProxyService:
     def proxy_request(self, *args, **kwargs):
         del args, kwargs
         return self._proxy_result
+
+
+class CompletingProxyService(StubProxyService):
+    def proxy_request(self, *args, **kwargs):
+        on_complete = kwargs.get("on_complete")
+        if callable(on_complete):
+            on_complete(
+                {
+                    "response_model": "gpt-4.1",
+                    "total_tokens": 3,
+                    "prompt_tokens": 1,
+                    "completion_tokens": 2,
+                }
+            )
+        return super().proxy_request(*args, **kwargs)
 
 
 class RecordingProxyService:
@@ -283,6 +342,32 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
             response.get_json(),
         )
 
+    def test_list_models_rejects_when_all_data_plane_auth_is_disabled(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(whitelist_enabled=False, api_key_enabled=False),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(),
+            FakeLogService(),
+            FakeProviderManager(provider),
+        )
+
+        response = app.test_client().get("/v1/models", environ_base={"REMOTE_ADDR": "127.0.0.1"})
+
+        self.assertEqual(403, response.status_code)
+        self.assertEqual("data_plane_auth_disabled", response.get_json()["error"]["code"])
+
     def test_list_models_includes_codex_models_without_provider_prefix(self) -> None:
         provider = LLMProvider(
             name="demo",
@@ -401,6 +486,138 @@ class ProxyControllerErrorFormatTests(unittest.TestCase):
 
         self.assertEqual(403, response.status_code)
         self.assertEqual("ip_not_whitelisted", response.get_json()["error"]["code"])
+
+    def test_list_models_allows_valid_api_key_without_whitelisted_ip(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1", "gpt-4.1-mini"),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(whitelist_enabled=True, api_key_enabled=True),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(user=None),
+            FakeLogService(),
+            FakeProviderManager(provider),
+            access_key_service=FakeAccessKeyService(accessible_models=["demo/gpt-4.1-mini"]),
+        )
+
+        response = app.test_client().get(
+            "/v1/models",
+            headers={"Authorization": "Bearer sk-valid"},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.get_json()
+        self.assertEqual(["demo/gpt-4.1-mini"], [item["id"] for item in payload["data"]])
+
+    def test_chat_completions_requires_api_key_when_key_auth_enabled_without_whitelist(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+        )
+        app = Flask(__name__)
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(whitelist_enabled=False, api_key_enabled=True),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            StubProxyService((None, 200, None)),
+            FakeUserService(user=None),
+            FakeLogService(),
+            FakeProviderManager(provider),
+            access_key_service=FakeAccessKeyService(),
+        )
+
+        response = app.test_client().post(
+            "/v1/chat/completions",
+            json={"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(401, response.status_code)
+        self.assertEqual("missing_api_key", response.get_json()["error"]["code"])
+
+    def test_chat_completions_logs_api_key_id_when_key_authorizes_request(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+        )
+        app = Flask(__name__)
+        FakeLogService.logged_api_key_id = None
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(api_key_enabled=True),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            CompletingProxyService((Response("{}", status=200), 200, None)),
+            FakeUserService(user=None),
+            FakeLogService(),
+            FakeProviderManager(provider),
+            access_key_service=FakeAccessKeyService(access_key={"id": 42, "name": "demo-key", "model_permissions": "*"}),
+        )
+
+        response = app.test_client().post(
+            "/v1/chat/completions",
+            headers={"X-API-Key": "sk-valid"},
+            json={"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(42, FakeLogService.logged_api_key_id)
+
+    def test_chat_completions_strips_proxy_api_key_before_upstream_request(self) -> None:
+        provider = LLMProvider(
+            name="demo",
+            api="https://example.com/v1/chat/completions",
+            model_list=("gpt-4.1",),
+        )
+        app = Flask(__name__)
+        proxy_service = RecordingProxyService((Response("{}", status=200), 200, None))
+        ctx = AppContext(
+            logger=FakeLogger(),
+            config_manager=FakeConfigManager(api_key_enabled=True),
+            root_path=Path(__file__).resolve().parents[1],
+            flask_app=app,
+        )
+        ProxyController(
+            ctx,
+            proxy_service,
+            FakeUserService(user=None),
+            FakeLogService(),
+            FakeProviderManager(provider),
+            access_key_service=FakeAccessKeyService(),
+        )
+
+        response = app.test_client().post(
+            "/v1/chat/completions",
+            headers={"Authorization": "Bearer sk-valid", "X-API-Key": "sk-valid"},
+            json={"model": "demo/gpt-4.1", "messages": [{"role": "user", "content": "hi"}]},
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        )
+
+        self.assertEqual(200, response.status_code)
+        assert proxy_service.last_args is not None
+        upstream_headers = cast(dict[str, str], proxy_service.last_args[2])
+        self.assertNotIn("Authorization", upstream_headers)
+        self.assertNotIn("X-API-Key", upstream_headers)
 
     def test_chat_completions_rejects_model_not_allowed_for_whitelisted_user(self) -> None:
         provider = LLMProvider(

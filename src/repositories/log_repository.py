@@ -23,6 +23,7 @@ class LogRepository:
     _STATISTICS_SORT_COLUMNS = {
         "ip_address": "COALESCE(d.ip_address, '')",
         "username": "COALESCE(u.username, '-')",
+        "api_key_name": "COALESCE(ak.name, '-')",
         "request_model": "d.request_model",
         "response_model": "NULLIF(d.response_model, '')",
         "request_count": "COALESCE(SUM(d.request_count), 0)",
@@ -44,6 +45,7 @@ class LogRepository:
     _LOG_SORT_COLUMNS = {
         "ip_address": "COALESCE(l.ip_address, '')",
         "username": "COALESCE(u.username, '-')",
+        "api_key_name": "COALESCE(ak.name, '-')",
         "request_model": "l.request_model",
         "response_model": "COALESCE(l.response_model, '')",
         "total_tokens": "COALESCE(l.total_tokens, 0)",
@@ -64,9 +66,38 @@ class LogRepository:
             cursor = conn.cursor()
             cursor.execute(
                 """
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL,
+                    ip_address TEXT NOT NULL UNIQUE,
+                    whitelist_access_enabled INTEGER DEFAULT 1,
+                    model_permissions TEXT NOT NULL DEFAULT '*',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS access_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    key_hash TEXT NOT NULL UNIQUE,
+                    key_value TEXT,
+                    masked_key TEXT NOT NULL,
+                    access_enabled INTEGER NOT NULL DEFAULT 1,
+                    model_permissions TEXT NOT NULL DEFAULT '*',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS request_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ip_address TEXT,
+                    api_key_id INTEGER,
                     request_model TEXT NOT NULL,
                     response_model TEXT,
                     total_tokens INTEGER,
@@ -78,28 +109,97 @@ class LogRepository:
                 )
                 """
             )
+            request_log_columns = {
+                str(row["name"]).strip() for row in cursor.execute("PRAGMA table_info(request_logs)").fetchall()
+            }
+            if "api_key_id" not in request_log_columns:
+                cursor.execute("ALTER TABLE request_logs ADD COLUMN api_key_id INTEGER")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_start_time ON request_logs(start_time)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_address ON request_logs(ip_address)")
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS daily_request_stats (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    stat_date TEXT NOT NULL,
-                    ip_address TEXT,
-                    request_model TEXT NOT NULL,
-                    response_model TEXT NOT NULL DEFAULT '',
-                    request_count INTEGER NOT NULL DEFAULT 0,
-                    total_tokens INTEGER NOT NULL DEFAULT 0,
-                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
-                    completion_tokens INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    UNIQUE(stat_date, ip_address, request_model, response_model)
-                )
-                """
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_api_key ON request_logs(api_key_id)")
+            self._ensure_daily_request_stats_table(cursor)
+
+    @staticmethod
+    def _create_daily_request_stats_table(cursor: sqlite3.Cursor, table_name: str) -> None:
+        """创建日聚合统计表，table_name 仅允许内部固定值。"""
+        cursor.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stat_date TEXT NOT NULL,
+                ip_address TEXT,
+                api_key_id INTEGER NOT NULL DEFAULT 0,
+                request_model TEXT NOT NULL,
+                response_model TEXT NOT NULL DEFAULT '',
+                request_count INTEGER NOT NULL DEFAULT 0,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(stat_date, ip_address, api_key_id, request_model, response_model)
             )
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_request_stats(stat_date)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_stats_ip ON daily_request_stats(ip_address)")
+            """
+        )
+
+    def _ensure_daily_request_stats_table(self, cursor: sqlite3.Cursor) -> None:
+        """确保日聚合统计表支持 API Key 维度。"""
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daily_request_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stat_date TEXT NOT NULL,
+                ip_address TEXT,
+                api_key_id INTEGER NOT NULL DEFAULT 0,
+                request_model TEXT NOT NULL,
+                response_model TEXT NOT NULL DEFAULT '',
+                request_count INTEGER NOT NULL DEFAULT 0,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(stat_date, ip_address, api_key_id, request_model, response_model)
+            )
+            """
+        )
+        columns = {str(row["name"]).strip() for row in cursor.execute("PRAGMA table_info(daily_request_stats)").fetchall()}
+        if "api_key_id" not in columns:
+            self._migrate_daily_request_stats_for_api_keys(cursor, has_api_key_id=False)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_request_stats(stat_date)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_stats_ip ON daily_request_stats(ip_address)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_stats_api_key ON daily_request_stats(api_key_id)")
+
+    def _migrate_daily_request_stats_for_api_keys(self, cursor: sqlite3.Cursor, *, has_api_key_id: bool) -> None:
+        """重建日聚合表，把历史数据迁移到 api_key_id=0。"""
+        del has_api_key_id
+        cursor.execute("DROP TABLE IF EXISTS daily_request_stats_new")
+        self._create_daily_request_stats_table(cursor, "daily_request_stats_new")
+        cursor.execute(
+            """
+            INSERT INTO daily_request_stats_new (
+                stat_date, ip_address, api_key_id, request_model, response_model,
+                request_count, total_tokens, prompt_tokens, completion_tokens,
+                created_at, updated_at
+            )
+            SELECT
+                stat_date,
+                ip_address,
+                0 AS api_key_id,
+                request_model,
+                response_model,
+                COALESCE(SUM(request_count), 0),
+                COALESCE(SUM(total_tokens), 0),
+                COALESCE(SUM(prompt_tokens), 0),
+                COALESCE(SUM(completion_tokens), 0),
+                MIN(created_at),
+                MAX(updated_at)
+            FROM daily_request_stats
+            GROUP BY stat_date, ip_address, request_model, response_model
+            """
+        )
+        cursor.execute("DROP TABLE daily_request_stats")
+        cursor.execute("ALTER TABLE daily_request_stats_new RENAME TO daily_request_stats")
 
     def insert(
         self,
@@ -111,6 +211,7 @@ class LogRepository:
         start_time: object | None = None,
         end_time: object | None = None,
         ip_address: str | None = None,
+        api_key_id: int | None = None,
     ) -> int | None:
         """写入单条请求日志，并同步更新日聚合统计。"""
         start_time_value = ensure_local_datetime(start_time)
@@ -126,12 +227,13 @@ class LogRepository:
             cursor.execute(
                 """
                 INSERT INTO request_logs
-                (ip_address, request_model, response_model, total_tokens,
+                (ip_address, api_key_id, request_model, response_model, total_tokens,
                  prompt_tokens, completion_tokens, start_time, end_time, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     ip_address,
+                    api_key_id,
                     request_model,
                     response_model,
                     safe_total_tokens,
@@ -147,12 +249,12 @@ class LogRepository:
                 """
                 INSERT INTO daily_request_stats
                 (
-                    stat_date, ip_address, request_model, response_model,
+                    stat_date, ip_address, api_key_id, request_model, response_model,
                     request_count, total_tokens, prompt_tokens, completion_tokens,
                     created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
-                ON CONFLICT(stat_date, ip_address, request_model, response_model)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+                ON CONFLICT(stat_date, ip_address, api_key_id, request_model, response_model)
                 DO UPDATE SET
                     request_count = request_count + 1,
                     total_tokens = total_tokens + excluded.total_tokens,
@@ -163,6 +265,7 @@ class LogRepository:
                 (
                     stat_date,
                     ip_address,
+                    int(api_key_id or 0),
                     request_model,
                     response_model_key,
                     safe_total_tokens,
@@ -272,6 +375,9 @@ class LogRepository:
             query = f"""
                 SELECT
                     d.ip_address,
+                    NULLIF(d.api_key_id, 0) as api_key_id,
+                    COALESCE(ak.name, '-') as api_key_name,
+                    COALESCE(ak.masked_key, '') as masked_api_key,
                     COALESCE(u.username, '-') as username,
                     d.request_model,
                     NULLIF(d.response_model, '') as response_model,
@@ -281,8 +387,9 @@ class LogRepository:
                     COALESCE(SUM(d.completion_tokens), 0) as completion_tokens
                 FROM daily_request_stats d
                 LEFT JOIN users u ON d.ip_address = u.ip_address
+                LEFT JOIN access_keys ak ON d.api_key_id = ak.id
                 WHERE {where_clause}
-                GROUP BY d.ip_address, u.username, d.request_model, d.response_model
+                GROUP BY d.ip_address, d.api_key_id, ak.name, ak.masked_key, u.username, d.request_model, d.response_model
                 {order_clause}
             """
             cursor.execute(query, params)
@@ -332,6 +439,7 @@ class LogRepository:
                     MAX(d.stat_date) as last_request_date
                 FROM daily_request_stats d
                 LEFT JOIN users u ON d.ip_address = u.ip_address
+                LEFT JOIN access_keys ak ON d.api_key_id = ak.id
                 WHERE {where_clause}
                 GROUP BY COALESCE(NULLIF(u.username, ''), d.ip_address, '-')
                 {order_clause}
@@ -372,6 +480,7 @@ class LogRepository:
             count_query = (
                 "SELECT COUNT(*) as total FROM request_logs l "
                 "LEFT JOIN users u ON l.ip_address = u.ip_address "
+                "LEFT JOIN access_keys ak ON l.api_key_id = ak.id "
                 f"WHERE {where_clause}"
             )
             cursor.execute(count_query, params)
@@ -385,11 +494,14 @@ class LogRepository:
                 "l.id DESC",
             )
             data_query = f"""
-                SELECT l.id, l.ip_address, COALESCE(u.username, '-') as username, l.request_model, l.response_model,
+                SELECT l.id, l.ip_address, l.api_key_id, COALESCE(ak.name, '-') as api_key_name,
+                       COALESCE(ak.masked_key, '') as masked_api_key,
+                       COALESCE(u.username, '-') as username, l.request_model, l.response_model,
                        l.total_tokens, l.prompt_tokens, l.completion_tokens,
                        l.start_time, l.end_time, l.created_at
                 FROM request_logs l
                 LEFT JOIN users u ON l.ip_address = u.ip_address
+                LEFT JOIN access_keys ak ON l.api_key_id = ak.id
                 WHERE {where_clause}
                 {order_clause}
                 LIMIT ? OFFSET ?
@@ -438,11 +550,14 @@ class LogRepository:
                 "l.id DESC",
             )
             query = f"""
-                SELECT l.id, l.ip_address, COALESCE(u.username, '-') as username, l.request_model, l.response_model,
+                SELECT l.id, l.ip_address, l.api_key_id, COALESCE(ak.name, '-') as api_key_name,
+                       COALESCE(ak.masked_key, '') as masked_api_key,
+                       COALESCE(u.username, '-') as username, l.request_model, l.response_model,
                        l.total_tokens, l.prompt_tokens, l.completion_tokens,
                        l.start_time, l.end_time, l.created_at
                 FROM request_logs l
                 LEFT JOIN users u ON l.ip_address = u.ip_address
+                LEFT JOIN access_keys ak ON l.api_key_id = ak.id
                 WHERE {where_clause}
                 {order_clause}
             """

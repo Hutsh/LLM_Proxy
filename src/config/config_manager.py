@@ -55,6 +55,9 @@ class ConfigManager:
     def is_chat_whitelist_enabled(self) -> bool:
         return self._read_bool("chat.whitelist_enabled", default=False)
 
+    def is_chat_api_key_enabled(self) -> bool:
+        return self._read_bool("chat.api_key_enabled", default=False)
+
     def is_llm_request_debug_enabled(self) -> bool:
         return self._read_bool("logging.llm_request_debug_enabled", default=False)
 

@@ -37,6 +37,7 @@ server:
 
 # chat:
 #   whitelist_enabled: false
+#   api_key_enabled: false
 
 # admin:
 #   username: admin
@@ -159,6 +160,7 @@ OAuth 模型是一个例外：模型 ID 直接使用 OAuth 模型目录里的裸
 - `server.host`：监听地址，默认 `127.0.0.1`
 - `server.port`：监听端口，默认 `8080`
 - `chat.whitelist_enabled`：是否启用聊天白名单
+- `chat.api_key_enabled`：是否启用数据面 `sk-` 访问密钥认证
 - `admin.username` / `admin.password`：配置后开启后台登录功能，用于提升后台访问安全性；不配置则后台无需登录
 - `auth_groups`：凭据池配置
 - `providers`：上游模型入口配置
@@ -456,13 +458,17 @@ Provider 编辑页的模型测试基于当前表单快照执行，不要求先�
 - 系统设置：`/settings`
 - 白名单按 IP 控制
 - 当 `chat.whitelist_enabled=true` 时，只有已登记且启用白名单权限的用户 IP 才能访问代理接口
+- 数据面访问密钥按 `sk-` token 控制
+- 当 `chat.api_key_enabled=true` 时，可以通过控制面 `/api/access-keys` 创建访问密钥，客户端使用 `Authorization: Bearer sk-...` 或 `X-API-Key: sk-...` 访问 `/v1/*`
+- 访问密钥列表脱敏展示但支持复制完整密钥，也支持像 IP 用户一样配置模型权限；历史记录如果缺少明文会自动补发新的可复制密钥
+- `chat.whitelist_enabled` 与 `chat.api_key_enabled` 互相独立：只开访问密钥时必须带有效 key，只开白名单时沿用 IP 准入，两者都开时任一方式通过即可访问，两者都关时数据面拒绝访问
 
 ### 5. 日志与统计
 
 - 应用日志写入 `logs/app.log`
 - 访问日志写入 `logs/access.log`
 - 请求明细和每日聚合统计写入 SQLite
-- 后台支持按日期、用户名、模型过滤统计和日志数据
+- 后台支持按日期、用户名、模型过滤统计和日志数据；请求明细和调用汇总会显示访问密钥维度
 
 ### 6. Hook 扩展
 

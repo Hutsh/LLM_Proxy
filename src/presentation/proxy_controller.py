@@ -23,6 +23,8 @@ from ..utils.local_time import now_local_datetime
 class ConfigManagerLike(Protocol):
     def is_chat_whitelist_enabled(self) -> bool: ...
 
+    def is_chat_api_key_enabled(self) -> bool: ...
+
 
 class ProxyServiceLike(Protocol):
     def proxy_request(
@@ -77,6 +79,23 @@ class UserServiceLike(Protocol):
     ) -> list[str]: ...
 
 
+class AccessKeyServiceLike(Protocol):
+    def get_access_key_by_token(self, api_key: str | None) -> dict[str, Any] | None: ...
+
+    def can_access_key_access_model(
+        self,
+        access_key: dict[str, Any] | None,
+        model_name: str,
+        available_models: Sequence[str] | None = None,
+    ) -> bool: ...
+
+    def get_accessible_models_for_key(
+        self,
+        access_key: dict[str, Any] | None,
+        available_models: Sequence[str] | None = None,
+    ) -> list[str]: ...
+
+
 class LogServiceLike(Protocol):
     def log_request(
         self,
@@ -88,6 +107,7 @@ class LogServiceLike(Protocol):
         start_time: Any = None,
         end_time: Any = None,
         ip_address: str | None = None,
+        api_key_id: int | None = None,
     ) -> int | None: ...
 
 
@@ -109,6 +129,7 @@ class ProxyController:
         user_service: UserServiceLike,
         log_service: LogServiceLike,
         provider_manager: ProviderManagerLike,
+        access_key_service: AccessKeyServiceLike | None = None,
         codex_proxy_service: CodexProxyServiceLike | None = None,
         claude_proxy_service: ClaudeProxyServiceLike | None = None,
     ):
@@ -119,6 +140,7 @@ class ProxyController:
         self._codex_proxy_service = codex_proxy_service
         self._claude_proxy_service = claude_proxy_service
         self._user_service = user_service
+        self._access_key_service = access_key_service
         self._log_service = log_service
         self._provider_manager = provider_manager
         self._register_routes()
@@ -205,26 +227,85 @@ class ProxyController:
     def _is_whitelist_required(self) -> bool:
         return self._config_manager.is_chat_whitelist_enabled()
 
-    def _get_authorized_user_for_request(
+    def _is_api_key_required(self) -> bool:
+        api_key_enabled = getattr(self._config_manager, "is_chat_api_key_enabled", None)
+        if not callable(api_key_enabled):
+            return False
+        return bool(api_key_enabled())
+
+    @staticmethod
+    def _extract_request_api_key() -> str | None:
+        """从 OpenAI 兼容请求头中提取代理访问密钥。"""
+        authorization = str(request.headers.get("Authorization") or "").strip()
+        if authorization.lower().startswith("bearer "):
+            token = authorization[7:].strip()
+            if token.startswith("sk-"):
+                return token
+
+        x_api_key = str(request.headers.get("X-API-Key") or "").strip()
+        if x_api_key.startswith("sk-"):
+            return x_api_key
+        return None
+
+    def _get_access_key_by_token(self, api_key: str | None) -> dict[str, Any] | None:
+        if not self._access_key_service or not api_key:
+            return None
+        try:
+            return self._access_key_service.get_access_key_by_token(api_key)
+        except ValueError:
+            return None
+
+    def _get_authorized_subject_for_request(
         self,
         client_ip: str,
         *,
         error_format: str,
-    ) -> tuple[dict[str, Any] | None, tuple[Response, int] | None]:
-        """在启用白名单时解析当前请求对应的用户。"""
-        if not self._is_whitelist_required():
-            return None, None
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, tuple[Response, int] | None]:
+        """解析当前请求对应的访问主体，访问密钥优先于 IP 白名单。"""
+        api_key_required = self._is_api_key_required()
+        whitelist_required = self._is_whitelist_required()
+        request_api_key = self._extract_request_api_key()
+        access_key = self._get_access_key_by_token(request_api_key) if api_key_required else None
+        if access_key:
+            return None, access_key, None
 
-        user = self._get_user_by_ip(client_ip)
-        if user:
-            return user, None
+        if whitelist_required:
+            user = self._get_user_by_ip(client_ip)
+            if user:
+                return user, None, None
 
-        self._logger.warning("Proxy denied: ip=%s is not in whitelist", client_ip)
-        return None, self._error_response(
-            f"IP address {client_ip} is not in whitelist",
+            self._logger.warning("Proxy denied: ip=%s is not in whitelist", client_ip)
+            return None, None, self._error_response(
+                f"IP address {client_ip} is not in whitelist",
+                403,
+                error_type="permission_error",
+                code="ip_not_whitelisted",
+                error_format=error_format,
+            )
+
+        if api_key_required:
+            if request_api_key:
+                self._logger.warning("Proxy denied: invalid API key from ip=%s", client_ip)
+                message = "Invalid API key"
+                code = "invalid_api_key"
+            else:
+                self._logger.warning("Proxy denied: missing API key from ip=%s", client_ip)
+                message = "Missing API key"
+                code = "missing_api_key"
+            return None, None, self._error_response(
+                message,
+                401,
+                error_type="authentication_error",
+                code=code,
+                error_format=error_format,
+            )
+
+        self._logger.warning("Proxy denied: data plane auth is disabled ip=%s", client_ip)
+        return None, None, self._error_response(
+            "Data plane access is disabled: enable Chat whitelist or sk authentication",
             403,
             error_type="permission_error",
-            code="ip_not_whitelisted",
+            code="data_plane_auth_disabled",
             error_format=error_format,
         )
 
@@ -361,7 +442,7 @@ class ProxyController:
         provider_name: str | None = None
         try:
             self._logger.info("Proxy request received: route=%s ip=%s", route_name, client_ip)
-            user, denial_response = self._get_authorized_user_for_request(
+            user, access_key, denial_response = self._get_authorized_subject_for_request(
                 client_ip,
                 error_format=resolved_error_format,
             )
@@ -417,19 +498,33 @@ class ProxyController:
                     )
 
             available_model_names = self._list_available_model_names()
-            if self._is_whitelist_required() and not self._user_service.can_user_access_model(
-                user,
-                model_name,
-                available_models=available_model_names,
-            ):
+            if access_key is not None and self._access_key_service is not None:
+                is_model_allowed = self._access_key_service.can_access_key_access_model(
+                    access_key,
+                    model_name,
+                    available_models=available_model_names,
+                )
+            elif self._is_whitelist_required():
+                is_model_allowed = self._user_service.can_user_access_model(
+                    user,
+                    model_name,
+                    available_models=available_model_names,
+                )
+            else:
+                is_model_allowed = True
+
+            if not is_model_allowed:
+                identity_label = (
+                    f"access_key={access_key.get('id')}" if access_key is not None else f"ip={client_ip}"
+                )
                 self._logger.warning(
-                    "Proxy denied: ip=%s is not allowed to access model=%s route=%s",
-                    client_ip,
+                    "Proxy denied: %s is not allowed to access model=%s route=%s",
+                    identity_label,
                     model_name,
                     route_name,
                 )
                 return self._error_response(
-                    f"IP address {client_ip} is not allowed to access model {model_name}",
+                    f"Current credential is not allowed to access model {model_name}",
                     403,
                     error_type="permission_error",
                     code="model_not_allowed",
@@ -462,6 +557,8 @@ class ProxyController:
                 target_format=resolved_target_format,
             )
             headers = self._filter_request_headers(request.headers)
+            if access_key is not None:
+                headers = self._strip_proxy_api_key_headers(headers)
             start_time = now_local_datetime()
 
             def on_proxy_complete(response_meta: dict[str, Any]) -> None:
@@ -482,6 +579,7 @@ class ProxyController:
                     start_time=start_time,
                     end_time=now_local_datetime(),
                     ip_address=client_ip,
+                    api_key_id=int(access_key["id"]) if access_key is not None else None,
                 )
 
             if is_codex_model:
@@ -590,7 +688,7 @@ class ProxyController:
     def list_models(self) -> ResponseReturnValue:
         try:
             client_ip = normalize_ip(request.remote_addr)
-            user, denial_response = self._get_authorized_user_for_request(
+            user, access_key, denial_response = self._get_authorized_subject_for_request(
                 client_ip,
                 error_format="openai_chat",
             )
@@ -598,7 +696,15 @@ class ProxyController:
                 return denial_response
 
             model_names = list(self._list_available_model_names())
-            if self._is_whitelist_required():
+            if access_key is not None and self._access_key_service is not None:
+                allowed_models = set(
+                    self._access_key_service.get_accessible_models_for_key(
+                        access_key,
+                        available_models=model_names,
+                    )
+                )
+                model_names = [model_name for model_name in model_names if model_name in allowed_models]
+            elif self._is_whitelist_required():
                 allowed_models = set(
                     self._user_service.get_accessible_models_for_user(
                         user,
@@ -692,6 +798,12 @@ class ProxyController:
             "upgrade",
         }
         return {k: v for k, v in headers.items() if k.lower() not in excluded}
+
+    @staticmethod
+    def _strip_proxy_api_key_headers(headers: dict[str, str]) -> dict[str, str]:
+        """移除代理自身访问密钥，避免透传到上游。"""
+        excluded = {"authorization", "x-api-key"}
+        return {key: value for key, value in headers.items() if key.lower() not in excluded}
 
     @staticmethod
     def _copy_headers(headers: Any) -> dict[str, str]:

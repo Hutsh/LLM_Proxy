@@ -71,6 +71,23 @@ class SettingsService:
         self._config_manager.write_raw_config(config)
         return parsed_enabled
 
+    def update_chat_api_key_enabled(self, enabled: Any) -> bool:
+        parsed_enabled = parse_optional_bool(enabled)
+        if parsed_enabled is None:
+            raise ValueError("API key enabled flag is required")
+
+        config = self._config_manager.get_raw_config()
+        chat_config = config.get("chat")
+        if chat_config is None:
+            chat_config = {}
+            config["chat"] = chat_config
+        if not isinstance(chat_config, dict):
+            raise ValueError("Config field 'chat' must be an object")
+
+        chat_config["api_key_enabled"] = parsed_enabled
+        self._config_manager.write_raw_config(config)
+        return parsed_enabled
+
     def update_basic_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("Request payload must be an object")

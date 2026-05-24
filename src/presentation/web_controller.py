@@ -388,6 +388,7 @@ class WebController:
                 headers = [
                     "IP",
                     "用户名",
+                    "访问密钥",
                     "请求模型",
                     "响应模型",
                     "输入token",
@@ -401,6 +402,7 @@ class WebController:
                     [
                         item["ip_address"],
                         item["username"],
+                        item.get("api_key_name") or "-",
                         item["request_model"],
                         item["response_model"],
                         item["prompt_tokens"],
@@ -423,11 +425,12 @@ class WebController:
                     sort_key=sort_key,
                     sort_direction=sort_direction,
                 )
-                headers = ["IP", "用户名", "请求模型", "响应模型", "输入token", "输出token", "总 Token", "请求数"]
+                headers = ["IP", "用户名", "访问密钥", "请求模型", "响应模型", "输入token", "输出token", "总 Token", "请求数"]
                 rows = [
                     [
                         item["ip_address"],
                         item["username"],
+                        item.get("api_key_name") or "-",
                         item["request_model"],
                         item["response_model"],
                         item["prompt_tokens"],

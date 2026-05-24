@@ -1,28 +1,56 @@
 {% extends "base_admin.html" %}
 
 {% block page_title %}用户管理{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/users.css?v=20260403-19">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/users.css?v=20260403-26">{% endblock %}
 {% block body_class %}users-page{% endblock %}
 {% block header_title %}用户管理{% endblock %}
 {% block header_subtitle %}管理用户、IP信息{% endblock %}
 
 {% block content %}
-        <section class="add-user-section">
-                <div class="add-user-card">
-                    <div class="section-title-group add-user-heading">
-                        <h2>添加用户</h2>
+        <section class="data-plane-auth-section">
+                <div class="data-plane-auth-card">
+                    <div class="data-plane-auth-header">
+                        <div class="section-title-group">
+                            <h2>访问控制</h2>
+                        </div>
+                        <div class="data-plane-auth-summary" id="dataPlaneAuthSummary">
+                            正在读取访问策略...
+                        </div>
                     </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>用户名 *</label>
-                            <input type="text" id="newUsername" placeholder="请输入用户名">
+                    <div class="data-plane-control-grid">
+                        <div class="data-plane-control-card" id="chatWhitelistCard">
+                            <div class="data-plane-control-copy">
+                                <div class="data-plane-control-title">
+                                    <span>IP 白名单</span>
+                                    <button
+                                            type="button"
+                                            class="field-help-button users-help-button"
+                                            id="chatWhitelistHelpBtn"
+                                            data-users-help-topic="whitelist"
+                                            onclick="toggleUsersHelp('whitelist', event)"
+                                            aria-label="查看 IP 白名单说明"
+                                        >?</button>
+                                </div>
+                                <p>按客户端 IP 放行，可继续配置用户模型权限。</p>
+                                <span class="data-plane-control-state" id="chatWhitelistStateText">未读取</span>
+                            </div>
+                            <label class="switch" aria-label="切换 IP 白名单">
+                                <input type="checkbox" id="chatWhitelistToggle" onchange="toggleChatWhitelist(this.checked)">
+                                <span class="slider"></span>
+                            </label>
                         </div>
-                        <div class="form-group">
-                            <label>IP 地址 *</label>
-                            <input type="text" id="newIpAddress" placeholder="仅支持 IPv4，例如 192.168.1.1">
-                        </div>
-                        <div class="form-group form-submit">
-                            <button class="btn btn-primary" onclick="createUser()">添加</button>
+                        <div class="data-plane-control-card" id="apiKeyAuthCard">
+                            <div class="data-plane-control-copy">
+                                <div class="data-plane-control-title">
+                                    <span>sk 认证</span>
+                                </div>
+                                <p>按访问密钥放行，适合客户端、CI 或第三方工具。</p>
+                                <span class="data-plane-control-state" id="apiKeyAuthStateText">未读取</span>
+                            </div>
+                            <label class="switch" aria-label="切换 sk 认证">
+                                <input type="checkbox" id="apiKeyAuthToggle" onchange="toggleApiKeyAuth(this.checked)">
+                                <span class="slider"></span>
+                            </label>
                         </div>
                     </div>
                 </div>
@@ -35,28 +63,22 @@
                             <div class="section-title-group">
                                 <h2>用户列表</h2>
                             </div>
-                            <div class="section-toolbar-actions">
-                                <div class="chat-whitelist-inline-control" id="chatWhitelistCard">
-                                    <div class="chat-whitelist-inline-meta">
-                                        <span class="chat-whitelist-inline-label">Chat 白名单</span>
-                                    </div>
-                                    <label class="switch" aria-label="切换 Chat 白名单">
-                                        <input type="checkbox" id="chatWhitelistToggle" onchange="toggleChatWhitelist(this.checked)">
-                                        <span class="slider"></span>
-                                    </label>
-                                    <button
-                                            type="button"
-                                            class="field-help-button users-help-button"
-                                            id="chatWhitelistHelpBtn"
-                                            data-users-help-topic="whitelist"
-                                            onclick="toggleUsersHelp('whitelist', event)"
-                                            aria-label="查看 Chat 白名单说明"
-                                        >?</button>
-                                </div>
-                            </div>
                         </div>
                     </div>
-                    <div class="users-batch-toolbar">
+                    <div class="add-user-create-row">
+                        <div class="form-group">
+                            <label>用户名 *</label>
+                            <input type="text" id="newUsername" placeholder="请输入用户名">
+                        </div>
+                        <div class="form-group">
+                            <label>IP 地址 *</label>
+                            <input type="text" id="newIpAddress" placeholder="仅支持 IPv4，例如 192.168.1.1">
+                        </div>
+                        <div class="form-group form-submit">
+                            <button class="btn btn-primary" onclick="createUser()">添加</button>
+                        </div>
+                    </div>
+                    <div class="users-batch-toolbar users-list-tools">
                         <div class="users-batch-controls" id="usersBatchControls" hidden>
                             <div class="users-batch-summary">
                                 已选 <strong id="selectedUsersSummary">0</strong> 个
@@ -66,6 +88,7 @@
                             </div>
                         </div>
                         <div class="section-search users-table-search" role="search" aria-label="搜索用户">
+                            <span class="users-filter-label">筛选</span>
                             <div class="section-search-field">
                                 <input
                                     type="text"
@@ -85,7 +108,7 @@
                                     hidden
                                 >&times;</button>
                             </div>
-                            <button type="button" class="btn btn-primary search-submit-button" onclick="applyUserSearch()">搜索</button>
+                            <button type="button" class="btn btn-toolbar-secondary search-submit-button" onclick="applyUserSearch()">搜索</button>
                         </div>
                     </div>
                     <div class="users-table-shell" id="usersTableContainer">
@@ -112,6 +135,39 @@
                             </div>
                             <span class="total-count" id="totalCount">共 0 条</span>
                         </div>
+                    </div>
+                </div>
+        </section>
+
+        <section class="access-key-section">
+                <div class="access-key-card">
+                    <div class="access-key-header">
+                        <div class="section-title-group">
+                            <h2>访问密钥</h2>
+                        </div>
+                    </div>
+                    <div class="access-key-create-row">
+                        <div class="form-group">
+                            <label>名称 *</label>
+                            <input type="text" id="newAccessKeyName" placeholder="例如 Cursor / Bob / CI">
+                        </div>
+                        <div class="form-group">
+                            <label>自定义 sk（可选）</label>
+                            <input type="text" id="newAccessKeyValue" placeholder="留空自动生成 sk-...">
+                        </div>
+                        <div class="form-group form-submit">
+                            <button class="btn btn-primary" id="createAccessKeyBtn" onclick="createAccessKey()">创建密钥</button>
+                        </div>
+                    </div>
+                    <div class="access-key-plain-result" id="accessKeyPlainResult" hidden>
+                        <div>
+                            <strong>新密钥已创建</strong>
+                            <input type="text" id="createdAccessKeyValue" readonly>
+                        </div>
+                        <button type="button" class="btn btn-toolbar-secondary" onclick="copyCreatedAccessKey()">复制</button>
+                    </div>
+                    <div class="access-key-table-shell" id="accessKeyTableContainer">
+                        <div class="loading">加载访问密钥...</div>
                     </div>
                 </div>
         </section>
@@ -208,6 +264,11 @@
         const initialWhitelistControlEnabled = {{ 'true' if chat_whitelist_enabled else 'false' }};
         let whitelistControlEnabled = initialWhitelistControlEnabled;
         let chatWhitelistSaving = false;
+        let apiKeyAuthEnabled = false;
+        let apiKeyAuthSaving = false;
+        let accessKeys = [];
+        let accessKeysLoading = false;
+        let creatingAccessKey = false;
         let users = [];
         let availableModels = [];
         let selectedUserIds = new Set();
@@ -225,6 +286,7 @@
         let pendingDeleteUserId = null;
         let deletingUserId = null;
         let permissionTargetUserIds = [];
+        let permissionTargetType = 'user';
         let permissionModalMode = 'single';
         let permissionDraftMode = 'all';
         let permissionDraftSelectedModels = new Set();
@@ -241,9 +303,9 @@
         };
         const usersHelpTopics = {
             whitelist: {
-                title: 'Chat 白名单',
+                title: 'IP 白名单',
                 html: `
-                    <p>启用后会按 IP 校验白名单，只允许已登记用户访问 Chat。</p>
+                    <p>启用后会按 IP 校验白名单，只允许已登记用户访问数据面接口。</p>
                     <p>同时会继续按用户模型权限控制 Chat 请求和 <code>/v1/models</code> 返回结果。</p>
                 `
             },
@@ -297,18 +359,22 @@
             return Array.isArray(availableModels) ? availableModels.length : 0;
         }
 
-        function normalizeUserPermissionState(user) {
-            if (!user || user.model_permissions === '*' || user.model_permissions_mode === 'all') {
+        function normalizePermissionState(subject) {
+            if (!subject || subject.model_permissions === '*' || subject.model_permissions_mode === 'all') {
                 return { mode: 'all', models: [] };
             }
-            const models = Array.isArray(user.model_permissions)
-                ? user.model_permissions.filter(item => typeof item === 'string' && item.trim())
+            const models = Array.isArray(subject.model_permissions)
+                ? subject.model_permissions.filter(item => typeof item === 'string' && item.trim())
                 : [];
             return { mode: 'selected', models: Array.from(new Set(models)) };
         }
 
-        function getPermissionSignature(user) {
-            const state = normalizeUserPermissionState(user);
+        function normalizeUserPermissionState(user) {
+            return normalizePermissionState(user);
+        }
+
+        function getPermissionSignature(subject) {
+            const state = normalizePermissionState(subject);
             return state.mode === 'all'
                 ? 'all:*'
                 : `selected:${state.models.slice().sort().join('|')}`;
@@ -393,6 +459,7 @@
         function updateChatWhitelistUi() {
             const card = document.getElementById('chatWhitelistCard');
             const toggle = document.getElementById('chatWhitelistToggle');
+            const stateText = document.getElementById('chatWhitelistStateText');
             if (!card || !toggle) return;
 
             card.dataset.enabled = whitelistControlEnabled ? 'true' : 'false';
@@ -401,8 +468,38 @@
             toggle.disabled = !!chatWhitelistSaving;
             toggle.title = chatWhitelistSaving
                 ? '保存中...'
-                : (whitelistControlEnabled ? 'Chat 白名单已启用' : 'Chat 白名单已禁用');
+                : (whitelistControlEnabled ? 'IP 白名单已启用' : 'IP 白名单已禁用');
+            if (stateText) {
+                stateText.textContent = chatWhitelistSaving
+                    ? '保存中'
+                    : (whitelistControlEnabled ? '已启用' : '已关闭');
+            }
+            updateDataPlaneAccessSummary();
             updateBatchToolbar();
+        }
+
+        function updateDataPlaneAccessSummary() {
+            const summary = document.getElementById('dataPlaneAuthSummary');
+            if (!summary) return;
+
+            let text = '';
+            let state = 'disabled';
+            if (whitelistControlEnabled && apiKeyAuthEnabled) {
+                text = '当前策略：白名单 IP 或有效 sk 任一通过；带有效 sk 时优先按密钥权限控制。';
+                state = 'mixed';
+            } else if (whitelistControlEnabled) {
+                text = '当前策略：仅白名单 IP 可访问，未登记 IP 会被拒绝。';
+                state = 'whitelist';
+            } else if (apiKeyAuthEnabled) {
+                text = '当前策略：仅有效 sk 可访问，IP 白名单不参与判断。';
+                state = 'api-key';
+            } else {
+                text = '当前策略：数据面已关闭，/v1/* 接口会拒绝访问。';
+                state = 'disabled';
+            }
+
+            summary.textContent = text;
+            summary.dataset.state = state;
         }
 
         function getUsersHelpPopoverElement() {
@@ -561,22 +658,312 @@
                 });
                 const result = await response.json();
                 if (!response.ok) {
-                    throw new Error(result.error || '更新 Chat 白名单失败');
+                    throw new Error(result.error || '更新 IP 白名单失败');
                 }
                 whitelistControlEnabled = !!result.enabled;
                 if (!whitelistControlEnabled) {
                     clearUserSelections(false);
                     closePermissionModal();
                 }
-                showMessage(`Chat 白名单已${whitelistControlEnabled ? '启用' : '禁用'}`, 'success');
+                showMessage(`IP 白名单已${whitelistControlEnabled ? '启用' : '禁用'}`, 'success');
             } catch (error) {
-                console.error('更新 Chat 白名单失败:', error);
+                console.error('更新 IP 白名单失败:', error);
                 whitelistControlEnabled = previous;
-                showActionError('更新 Chat 白名单', error, { fallback: '更新 Chat 白名单失败' });
+                showActionError('更新 IP 白名单', error, { fallback: '更新 IP 白名单失败' });
             } finally {
                 chatWhitelistSaving = false;
                 updateChatWhitelistUi();
                 renderUsers();
+            }
+        }
+
+        function updateApiKeyAuthUi() {
+            const toggle = document.getElementById('apiKeyAuthToggle');
+            const card = document.getElementById('apiKeyAuthCard');
+            const stateText = document.getElementById('apiKeyAuthStateText');
+            if (!toggle || !card) return;
+
+            toggle.checked = !!apiKeyAuthEnabled;
+            toggle.disabled = apiKeyAuthSaving;
+            card.dataset.enabled = apiKeyAuthEnabled ? 'true' : 'false';
+            card.dataset.saving = apiKeyAuthSaving ? 'true' : 'false';
+            card.title = apiKeyAuthSaving
+                ? '正在更新 sk 认证'
+                : (apiKeyAuthEnabled ? 'sk 认证已启用' : 'sk 认证已禁用');
+            if (stateText) {
+                stateText.textContent = apiKeyAuthSaving
+                    ? '保存中'
+                    : (apiKeyAuthEnabled ? '已启用' : '已关闭');
+            }
+            updateDataPlaneAccessSummary();
+        }
+
+        async function toggleApiKeyAuth(enabled) {
+            const previous = apiKeyAuthEnabled;
+            apiKeyAuthEnabled = !!enabled;
+            apiKeyAuthSaving = true;
+            updateApiKeyAuthUi();
+
+            try {
+                const response = await fetch('/api/access-keys/settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !!enabled })
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '更新 sk 认证失败');
+                }
+                apiKeyAuthEnabled = !!result.enabled;
+                showMessage(`sk 认证已${apiKeyAuthEnabled ? '启用' : '禁用'}`, 'success');
+            } catch (error) {
+                console.error('更新 sk 认证失败:', error);
+                apiKeyAuthEnabled = previous;
+                showActionError('更新 sk 认证', error, { fallback: '更新 sk 认证失败' });
+            } finally {
+                apiKeyAuthSaving = false;
+                updateApiKeyAuthUi();
+            }
+        }
+
+        async function loadAccessKeys() {
+            accessKeysLoading = true;
+            renderAccessKeys();
+            try {
+                const response = await fetch('/api/access-keys');
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '加载访问密钥失败');
+                }
+                apiKeyAuthEnabled = !!result.enabled;
+                accessKeys = Array.isArray(result.access_keys) ? result.access_keys : [];
+                if (Array.isArray(result.available_models)) {
+                    availableModels = result.available_models;
+                }
+            } catch (error) {
+                console.error('加载访问密钥失败:', error);
+                showActionError('加载访问密钥', error, { fallback: '加载访问密钥失败' });
+                accessKeys = [];
+            } finally {
+                accessKeysLoading = false;
+                updateApiKeyAuthUi();
+                renderAccessKeys();
+            }
+        }
+
+        function renderAccessKeys() {
+            const container = document.getElementById('accessKeyTableContainer');
+            if (!container) return;
+
+            if (accessKeysLoading) {
+                container.innerHTML = '<div class="loading">加载访问密钥...</div>';
+                return;
+            }
+
+            if (!accessKeys.length) {
+                container.innerHTML = '<div class="empty-state access-key-empty">暂无访问密钥</div>';
+                return;
+            }
+
+            const rows = accessKeys.map(accessKey => {
+                const enabled = !!accessKey.access_enabled;
+                const permissionText = accessKey.model_permissions_mode === 'all'
+                    ? '全部模型'
+                    : `${Number(accessKey.allowed_models_count || 0)} 个模型`;
+                const keyValue = String(accessKey.api_key || accessKey.masked_key || '');
+                const displayKey = String(accessKey.masked_key || maskAccessKeyForDisplay(keyValue) || keyValue || '');
+                return `
+                    <tr>
+                        <td>${escapeHtml(accessKey.name || '-')}</td>
+                        <td class="access-key-value-cell"><code>${escapeHtml(displayKey || '-')}</code></td>
+                        <td>${permissionText}</td>
+                        <td><span class="status-badge ${enabled ? 'status-enabled' : 'status-disabled'}">${enabled ? '启用' : '停用'}</span></td>
+                        <td>${formatDateTime(accessKey.created_at)}</td>
+                        <td class="actions-cell">
+                            <button class="btn-action btn-edit" onclick='copyAccessKeyValue(${JSON.stringify(keyValue)})'>复制</button>
+                            <button class="btn-action btn-model" onclick="openPermissionModalForAccessKey(${Number(accessKey.id)})">模型权限</button>
+                            <button class="btn-action btn-edit" onclick="toggleAccessKey(${Number(accessKey.id)})">${enabled ? '停用' : '启用'}</button>
+                            <button class="btn-action btn-delete" onclick="deleteAccessKey(${Number(accessKey.id)})">删除</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            container.innerHTML = `
+                <div class="table-responsive">
+                    <table class="access-key-table">
+                        <thead>
+                            <tr>
+                                <th>名称</th>
+                                <th>密钥</th>
+                                <th>模型权限</th>
+                                <th>状态</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        async function createAccessKey() {
+            if (creatingAccessKey) return;
+
+            const nameInput = document.getElementById('newAccessKeyName');
+            const valueInput = document.getElementById('newAccessKeyValue');
+            const createButton = document.getElementById('createAccessKeyBtn');
+            const name = nameInput ? nameInput.value.trim() : '';
+            const apiKey = valueInput ? valueInput.value.trim() : '';
+
+            if (!name) {
+                showMessage('请输入访问密钥名称', 'error');
+                return;
+            }
+            if (apiKey && !apiKey.startsWith('sk-')) {
+                showMessage('自定义密钥必须以 sk- 开头', 'error');
+                return;
+            }
+
+            creatingAccessKey = true;
+            if (createButton) {
+                createButton.disabled = true;
+                createButton.textContent = '创建中...';
+            }
+
+            try {
+                const payload = { name };
+                if (apiKey) {
+                    payload.api_key = apiKey;
+                }
+                const response = await fetch('/api/access-keys', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '创建访问密钥失败');
+                }
+                showCreatedAccessKey(result.api_key || '');
+                if (nameInput) nameInput.value = '';
+                if (valueInput) valueInput.value = '';
+                showMessage('访问密钥创建成功', 'success');
+                loadAccessKeys();
+            } catch (error) {
+                console.error('创建访问密钥失败:', error);
+                showActionError('创建访问密钥', error, { fallback: '创建访问密钥失败' });
+            } finally {
+                creatingAccessKey = false;
+                if (createButton) {
+                    createButton.disabled = false;
+                    createButton.textContent = '创建密钥';
+                }
+            }
+        }
+
+        function showCreatedAccessKey(apiKey, title = '新密钥已创建') {
+            const resultBox = document.getElementById('accessKeyPlainResult');
+            const resultInput = document.getElementById('createdAccessKeyValue');
+            if (!resultBox || !resultInput) return;
+            const resultTitle = resultBox.querySelector('strong');
+            if (resultTitle) {
+                resultTitle.textContent = title;
+            }
+            resultInput.value = apiKey;
+            resultBox.hidden = false;
+            window.requestAnimationFrame(() => {
+                resultInput.focus();
+                resultInput.select();
+            });
+        }
+
+        async function copyCreatedAccessKey() {
+            const resultInput = document.getElementById('createdAccessKeyValue');
+            if (!resultInput || !resultInput.value) return;
+            copyAccessKeyValue(resultInput.value);
+        }
+
+        function maskAccessKeyForDisplay(apiKey) {
+            const normalizedApiKey = String(apiKey || '').trim();
+            if (!normalizedApiKey) return '';
+            if (normalizedApiKey.length <= 12) return 'sk-***';
+            return `${normalizedApiKey.slice(0, 7)}...${normalizedApiKey.slice(-4)}`;
+        }
+
+        async function copyAccessKeyValue(apiKey) {
+            const normalizedApiKey = String(apiKey || '').trim();
+            if (!normalizedApiKey) {
+                showMessage('没有可复制的访问密钥', 'error');
+                return;
+            }
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(normalizedApiKey);
+                } else if (!fallbackCopyText(normalizedApiKey)) {
+                    throw new Error('clipboard unavailable');
+                }
+                showMessage('访问密钥已复制', 'success');
+            } catch (error) {
+                if (fallbackCopyText(normalizedApiKey)) {
+                    showMessage('访问密钥已复制', 'success');
+                    return;
+                }
+                showCreatedAccessKey(normalizedApiKey, '访问密钥已选中');
+                showMessage('浏览器限制自动复制，已选中密钥，请按 Ctrl+C', 'info', { dismissMs: 6000 });
+            }
+        }
+
+        function fallbackCopyText(text) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            textarea.style.top = '0';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            let copied = false;
+            try {
+                copied = document.execCommand('copy');
+            } catch (error) {
+                copied = false;
+            } finally {
+                document.body.removeChild(textarea);
+            }
+            return copied;
+        }
+
+        async function toggleAccessKey(keyId) {
+            try {
+                const response = await fetch(`/api/access-keys/${keyId}/toggle`, { method: 'POST' });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '切换访问密钥状态失败');
+                }
+                showMessage('访问密钥状态已更新', 'success');
+                loadAccessKeys();
+            } catch (error) {
+                console.error('切换访问密钥状态失败:', error);
+                showActionError('切换访问密钥状态', error, { fallback: '切换访问密钥状态失败' });
+            }
+        }
+
+        async function deleteAccessKey(keyId) {
+            if (!window.confirm('确认删除这个访问密钥？')) return;
+            try {
+                const response = await fetch(`/api/access-keys/${keyId}`, { method: 'DELETE' });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || '删除访问密钥失败');
+                }
+                showMessage('访问密钥已删除', 'success');
+                loadAccessKeys();
+            } catch (error) {
+                console.error('删除访问密钥失败:', error);
+                showActionError('删除访问密钥', error, { fallback: '删除访问密钥失败' });
             }
         }
 
@@ -674,9 +1061,11 @@
         function initUsersPage() {
             initThemeToggle();
             updateChatWhitelistUi();
+            updateApiKeyAuthUi();
             setupCustomSelect('pageSizeSelect');
             initUsersHelpInteractions();
             initUserSearch();
+            loadAccessKeys();
             loadUsers();
             document.getElementById('pageSizeSelect').value = pageSize;
             syncCustomSelectValue('pageSizeSelect');
@@ -694,6 +1083,7 @@
                 permissionModalInstance = new bootstrap.Modal(permissionModalElement);
                 permissionModalElement.addEventListener('hidden.bs.modal', function() {
                     permissionTargetUserIds = [];
+                    permissionTargetType = 'user';
                     permissionModalMode = 'single';
                     permissionDraftMode = 'all';
                     permissionDraftSelectedModels = new Set();
@@ -1458,7 +1848,7 @@
 
         function openPermissionModalForUser(userId) {
             if (!whitelistControlEnabled) {
-                showMessage('请先启用 Chat 白名单，再设置模型权限', 'error');
+                showMessage('请先启用 IP 白名单，再设置模型权限', 'error');
                 return;
             }
 
@@ -1466,6 +1856,7 @@
             if (!user) return;
 
             permissionModalMode = 'single';
+            permissionTargetType = 'user';
             permissionTargetUserIds = [Number(userId)];
             permissionDraftMixedSource = false;
             const currentState = normalizeUserPermissionState(user);
@@ -1477,9 +1868,26 @@
             }
         }
 
+        function openPermissionModalForAccessKey(keyId) {
+            const accessKey = accessKeys.find(item => Number(item.id) === Number(keyId));
+            if (!accessKey) return;
+
+            permissionModalMode = 'single';
+            permissionTargetType = 'access_key';
+            permissionTargetUserIds = [Number(keyId)];
+            permissionDraftMixedSource = false;
+            const currentState = normalizePermissionState(accessKey);
+            permissionDraftMode = currentState.mode;
+            permissionDraftSelectedModels = new Set(currentState.models);
+            updatePermissionModalUi();
+            if (permissionModalInstance) {
+                permissionModalInstance.show();
+            }
+        }
+
         function openPermissionModalForBatch() {
             if (!whitelistControlEnabled) {
-                showMessage('请先启用 Chat 白名单，再设置模型权限', 'error');
+                showMessage('请先启用 IP 白名单，再设置模型权限', 'error');
                 return;
             }
 
@@ -1497,6 +1905,7 @@
                 : { mode: 'all', models: [] };
 
             permissionModalMode = 'batch';
+            permissionTargetType = 'user';
             permissionTargetUserIds = selectedIds;
             permissionDraftMixedSource = !allSame;
             permissionDraftMode = seedState.mode;
@@ -1578,10 +1987,17 @@
             const saveButton = document.getElementById('savePermissionBtn');
 
             if (title) {
-                title.textContent = permissionModalMode === 'batch' ? '批量设置模型权限' : '模型权限';
+                if (permissionTargetType === 'access_key') {
+                    title.textContent = '访问密钥模型权限';
+                } else {
+                    title.textContent = permissionModalMode === 'batch' ? '批量设置模型权限' : '模型权限';
+                }
             }
             if (subtitle) {
-                if (permissionModalMode === 'batch') {
+                if (permissionTargetType === 'access_key') {
+                    const accessKey = accessKeys.find(item => Number(item.id) === Number(permissionTargetUserIds[0]));
+                    subtitle.textContent = `设置访问密钥 ${accessKey ? accessKey.name : ''} 可访问的模型。`;
+                } else if (permissionModalMode === 'batch') {
                     subtitle.textContent = permissionDraftMixedSource
                         ? `已选择 ${permissionTargetUserIds.length} 个用户，当前权限不一致，保存后将统一覆盖。`
                         : `已选择 ${permissionTargetUserIds.length} 个用户，将统一应用下方权限。`;
@@ -1637,7 +2053,15 @@
 
             try {
                 let response;
-                if (permissionModalMode === 'batch') {
+                if (permissionTargetType === 'access_key') {
+                    response = await fetch(`/api/access-keys/${permissionTargetUserIds[0]}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model_permissions: payload
+                        })
+                    });
+                } else if (permissionModalMode === 'batch') {
                     response = await fetch('/api/users/batch', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -1663,22 +2087,34 @@
                 }
 
                 showMessage(
-                    permissionModalMode === 'batch'
+                    permissionTargetType === 'access_key'
+                        ? '访问密钥模型权限更新成功'
+                        : permissionModalMode === 'batch'
                         ? `已批量更新 ${permissionTargetUserIds.length} 个用户的模型权限`
                         : '模型权限更新成功',
                     'success'
                 );
-                if (permissionModalMode === 'batch') {
+                if (permissionTargetType === 'access_key') {
+                    await loadAccessKeys();
+                } else if (permissionModalMode === 'batch') {
                     clearUserSelections(false);
                 }
                 closePermissionModal();
-                await loadUsers();
+                if (permissionTargetType !== 'access_key') {
+                    await loadUsers();
+                }
             } catch (error) {
                 console.error('保存模型权限失败:', error);
                 showActionError(
-                    permissionModalMode === 'batch' ? '批量设置模型权限' : '更新模型权限',
+                    permissionTargetType === 'access_key'
+                        ? '更新访问密钥模型权限'
+                        : permissionModalMode === 'batch' ? '批量设置模型权限' : '更新模型权限',
                     error,
-                    { fallback: permissionModalMode === 'batch' ? '批量设置模型权限失败' : '更新模型权限失败' }
+                    {
+                        fallback: permissionTargetType === 'access_key'
+                            ? '更新访问密钥模型权限失败'
+                            : permissionModalMode === 'batch' ? '批量设置模型权限失败' : '更新模型权限失败'
+                    }
                 );
             } finally {
                 permissionSaving = false;

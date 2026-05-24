@@ -18,6 +18,7 @@ from ..config import (
     build_provider_schemas,
 )
 from ..presentation import (
+    AccessKeyController,
     AuthenticationController,
     OAuthController,
     ProviderController,
@@ -26,8 +27,9 @@ from ..presentation import (
     WebController,
     create_flask_app,
 )
-from ..repositories import AuthGroupRepository, LogRepository, UserRepository
+from ..repositories import AccessKeyRepository, AuthGroupRepository, LogRepository, UserRepository
 from ..services import (
+    AccessKeyService,
     AuthenticationService,
     AuthGroupService,
     ClaudeOAuthService,
@@ -230,6 +232,7 @@ class Application:
         db_path = Path(self._config_manager.get_database_path())
         self._db_connection_factory = create_connection_factory(db_path)
         self._user_repository = UserRepository(self._db_connection_factory)
+        self._access_key_repository = AccessKeyRepository(self._db_connection_factory)
         self._log_repository = LogRepository(self._db_connection_factory)
         self._auth_group_repository = AuthGroupRepository(self._db_connection_factory)
 
@@ -246,6 +249,7 @@ class Application:
         """初始化服务层并完成路由注册。"""
         auth_service = AuthenticationService(self._ctx)
         user_service = UserService(self._ctx, self._user_repository)
+        access_key_service = AccessKeyService(self._ctx, self._access_key_repository)
         self._user_service = user_service
         self._user_service.sync_model_permissions()
         proxy_service = ProxyService(self._ctx, self._auth_group_manager)
@@ -272,6 +276,12 @@ class Application:
 
         self._auth_controller = AuthenticationController(self._ctx, auth_service)
         self._user_controller = UserController(self._ctx, user_service, auth_service)
+        self._access_key_controller = AccessKeyController(
+            self._ctx,
+            access_key_service,
+            settings_service,
+            auth_service,
+        )
         self._provider_controller = ProviderController(
             self._ctx,
             provider_service,
@@ -293,6 +303,7 @@ class Application:
             user_service,
             log_service,
             self._provider_manager,
+            access_key_service=access_key_service,
             codex_proxy_service=codex_proxy_service,
             claude_proxy_service=claude_proxy_service,
         )

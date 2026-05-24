@@ -89,6 +89,7 @@
                             <tr>
                                 <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('ip_address', 'string')">IP <span class="sort-indicator" id="statsSortIndicator_ip_address"></span></button></th>
                                 <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('username', 'string')">用户名 <span class="sort-indicator" id="statsSortIndicator_username"></span></button></th>
+                                <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('api_key_name', 'string')">访问密钥 <span class="sort-indicator" id="statsSortIndicator_api_key_name"></span></button></th>
                                 <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('request_model', 'string')">请求模型 <span class="sort-indicator" id="statsSortIndicator_request_model"></span></button></th>
                                 <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('response_model', 'string')">响应模型 <span class="sort-indicator" id="statsSortIndicator_response_model"></span></button></th>
                                 <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleStatsSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="statsSortIndicator_prompt_tokens"></span></button></th>
@@ -99,7 +100,7 @@
                         </thead>
                         <tbody id="statsTable">
                             <tr>
-                                <td colspan="8" class="loading">加载统计数据...</td>
+                                <td colspan="9" class="loading">加载统计数据...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -137,6 +138,7 @@
                                 <tr>
                                     <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('ip_address', 'string')">IP <span class="sort-indicator" id="logsSortIndicator_ip_address"></span></button></th>
                                     <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('username', 'string')">用户名 <span class="sort-indicator" id="logsSortIndicator_username"></span></button></th>
+                                    <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('api_key_name', 'string')">访问密钥 <span class="sort-indicator" id="logsSortIndicator_api_key_name"></span></button></th>
                                     <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('request_model', 'string')">请求模型 <span class="sort-indicator" id="logsSortIndicator_request_model"></span></button></th>
                                     <th class="sortable-th" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('response_model', 'string')">响应模型 <span class="sort-indicator" id="logsSortIndicator_response_model"></span></button></th>
                                     <th class="sortable-th num-col" aria-sort="none"><button type="button" class="sort-button" onclick="toggleLogsSort('prompt_tokens', 'number')">输入token <span class="sort-indicator" id="logsSortIndicator_prompt_tokens"></span></button></th>
@@ -149,7 +151,7 @@
                             </thead>
                             <tbody id="logsTable">
                                 <tr>
-                                    <td colspan="10" class="loading">加载请求数据...</td>
+                                    <td colspan="11" class="loading">加载请求数据...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -954,9 +956,9 @@
             setDefaultDateRange();
             loadUsernames();
             loadRequestModels();
-            updateSortIndicators('stats', statsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count']);
+            updateSortIndicators('stats', statsSortState, ['ip_address', 'username', 'api_key_name', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count']);
             updateSortIndicators('userUsage', userUsageSortState, ['username', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count', 'ip_count', 'last_request_date']);
-            updateSortIndicators('logs', logsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'start_time', 'end_time', 'duration']);
+            updateSortIndicators('logs', logsSortState, ['ip_address', 'username', 'api_key_name', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'start_time', 'end_time', 'duration']);
             syncDashboardTabUi();
             switchDashboardTab(activeDashboardTab);
 
@@ -1007,7 +1009,7 @@
         // 加载统计数据
         async function loadStatistics() {
             const requestToken = ++statsRequestToken;
-            document.getElementById('statsTable').innerHTML = '<tr><td colspan="8" class="loading">加载统计数据...</td></tr>';
+            document.getElementById('statsTable').innerHTML = '<tr><td colspan="9" class="loading">加载统计数据...</td></tr>';
 
             try {
                 const params = buildDashboardSearchParams({
@@ -1027,17 +1029,17 @@
             } catch (error) {
                 if (requestToken !== statsRequestToken) return;
                 console.error('加载统计数据失败:', error);
-                document.getElementById('statsTable').innerHTML = '<tr><td colspan="8" class="error">加载统计数据失败</td></tr>';
+                document.getElementById('statsTable').innerHTML = '<tr><td colspan="9" class="error">加载统计数据失败</td></tr>';
                 showMessage('加载统计数据失败，请稍后重试', 'error');
             }
         }
 
         function renderStatistics() {
             const statsTable = document.getElementById('statsTable');
-            updateSortIndicators('stats', statsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count']);
+            updateSortIndicators('stats', statsSortState, ['ip_address', 'username', 'api_key_name', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'request_count']);
 
             if (statsData.length === 0) {
-                statsTable.innerHTML = `<tr><td colspan="10" class="empty-state">
+                statsTable.innerHTML = `<tr><td colspan="9" class="empty-state">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:40px;height:40px;max-width:40px;max-height:40px;display:block;margin:0 auto 8px;">
                                 <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                             </svg>
@@ -1062,6 +1064,7 @@
                     <tr>
                         <td>${stat.ip_address ? `<span class="ip-address" title="${escapeHtml(stat.ip_address)}">${escapeHtml(stat.ip_address)}</span>` : '-'}</td>
                         <td>${stat.username || '-'}</td>
+                        <td>${stat.api_key_name && stat.api_key_name !== '-' ? `${escapeHtml(stat.api_key_name)}<br><span class="text-muted">${escapeHtml(stat.masked_api_key || '')}</span>` : '-'}</td>
                         <td>${renderModelBadge(stat.request_model)}</td>
                         <td>${renderModelBadge(stat.response_model)}</td>
                         <td class="num-col">${renderNumber(stat.prompt_tokens || 0)}</td>
@@ -1074,7 +1077,7 @@
 
             html += `
                 <tr class="stats-total-row">
-                    <td colspan="4">总计</td>
+                    <td colspan="5">总计</td>
                     <td class="num-col">${renderNumber(totalPromptTokens)}</td>
                     <td class="num-col">${renderNumber(totalCompletionTokens)}</td>
                     <td class="num-col">${renderNumber(totalTokens)}</td>
@@ -1216,7 +1219,7 @@
             const requestToken = ++logsRequestToken;
             document.getElementById('tableFooter').style.display = 'none';
             // 显示加载状态
-            document.getElementById('logsTable').innerHTML = '<tr><td colspan="10" class="loading">加载请求数据...</td></tr>';
+            document.getElementById('logsTable').innerHTML = '<tr><td colspan="11" class="loading">加载请求数据...</td></tr>';
 
             try {
                 const params = buildDashboardSearchParams({
@@ -1241,7 +1244,7 @@
                 if (requestToken !== logsRequestToken) return;
                 document.getElementById('tableFooter').style.display = 'none';
                 console.error('加载日志失败:', error);
-                document.getElementById('logsTable').innerHTML = '<tr><td colspan="10" class="error">加载日志失败</td></tr>';
+                document.getElementById('logsTable').innerHTML = '<tr><td colspan="11" class="error">加载日志失败</td></tr>';
                 showMessage('加载日志失败，请稍后重试', 'error');
             }
         }
@@ -1249,12 +1252,12 @@
         // 渲染日志表格
         function renderLogs(logs) {
             const tbody = document.getElementById('logsTable');
-            updateSortIndicators('logs', logsSortState, ['ip_address', 'username', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'start_time', 'end_time', 'duration']);
+            updateSortIndicators('logs', logsSortState, ['ip_address', 'username', 'api_key_name', 'request_model', 'response_model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'start_time', 'end_time', 'duration']);
 
             if (logs.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="10" class="empty-state">
+                        <td colspan="11" class="empty-state">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:40px;height:40px;max-width:40px;max-height:40px;display:block;margin:0 auto 8px;">
                                 <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                             </svg>
@@ -1277,6 +1280,7 @@
                     <tr>
                         <td>${log.ip_address ? `<span class="ip-address" title="${escapeHtml(log.ip_address)}">${escapeHtml(log.ip_address)}</span>` : '-'}</td>
                         <td>${log.username || '-'}</td>
+                        <td>${log.api_key_name && log.api_key_name !== '-' ? `${escapeHtml(log.api_key_name)}<br><span class="text-muted">${escapeHtml(log.masked_api_key || '')}</span>` : '-'}</td>
                         <td>${renderModelBadge(log.request_model)}</td>
                         <td>${renderModelBadge(log.response_model)}</td>
                         <td class="num-col">${renderNumber(log.prompt_tokens || 0)}</td>

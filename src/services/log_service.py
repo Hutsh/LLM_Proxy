@@ -39,6 +39,7 @@ class LogService:
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         ip_address: str | None = None,
+        api_key_id: int | None = None,
     ) -> int | None:
         """记录一次请求日志。"""
         try:
@@ -51,14 +52,16 @@ class LogService:
                 start_time=start_time,
                 end_time=end_time,
                 ip_address=ip_address,
+                api_key_id=api_key_id,
             )
             self._logger.info(
-                "Request log saved: id=%s model=%s response_model=%s total_tokens=%s ip=%s",
+                "Request log saved: id=%s model=%s response_model=%s total_tokens=%s ip=%s api_key_id=%s",
                 log_id,
                 request_model,
                 response_model,
                 total_tokens,
                 ip_address,
+                api_key_id,
             )
             return log_id
         except Exception as exc:
@@ -89,6 +92,9 @@ class LogService:
                     "request_model": row["request_model"],
                     "response_model": row["response_model"],
                     "ip_address": row["ip_address"],
+                    "api_key_id": row["api_key_id"],
+                    "api_key_name": row["api_key_name"],
+                    "masked_api_key": row["masked_api_key"],
                     "username": row["username"],
                     "request_count": row["request_count"],
                     "total_tokens": row["total_tokens"],
